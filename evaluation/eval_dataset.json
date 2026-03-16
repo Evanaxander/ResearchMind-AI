@@ -1,0 +1,24 @@
+{
+  "test_cases": [
+    {
+      "question": "What are the main themes explored in the document?",
+      "ground_truth": "The document explores themes of artistic creation, ownership of ideas, personal connection to work, and the significance of specific artworks that encapsulate a person's history and persistence."
+    },
+    {
+      "question": "How does the author describe the relationship between an artist and their work?",
+      "ground_truth": "The author describes the relationship as deeply personal, where an artist absorbs a subject, recreates it, and makes it their own rather than merely adopting ideas from others."
+    },
+    {
+      "question": "What role does memory play in the document?",
+      "ground_truth": "Memory plays a central role as the document reflects on past experiences, personal history, and how specific objects and artworks encapsulate a person's journey and persistence over time."
+    },
+    {
+      "question": "How is originality discussed in the document?",
+      "ground_truth": "Originality is discussed in contrast to mere adoption of ideas. The document suggests true originality comes from deeply absorbing and recreating a subject rather than copying or borrowing from others."
+    },
+    {
+      "question": "What is the significance of the artwork mentioned in the document?",
+      "ground_truth": "The artwork is significant because it encapsulates the author's personal history and persistence, representing a genuine creative connection rather than simple imitation."
+    }
+  ]
+}

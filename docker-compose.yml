@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+
+  api:
+    build: .
+    container_name: researchmind_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./faiss_index:/app/faiss_index
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: researchmind_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  faiss_index:
