@@ -1,24 +1,24 @@
 {
   "test_cases": [
     {
-      "question": "What are the main themes explored in the document?",
-      "ground_truth": "The document explores themes of artistic creation, ownership of ideas, personal connection to work, and the significance of specific artworks that encapsulate a person's history and persistence."
+      "question": "What is the attention mechanism and how does it work?",
+      "ground_truth": "The attention mechanism maps a query and a set of key-value pairs to an output. The output is a weighted sum of values, where weights are computed by a compatibility function of the query with the corresponding keys."
     },
     {
-      "question": "How does the author describe the relationship between an artist and their work?",
-      "ground_truth": "The author describes the relationship as deeply personal, where an artist absorbs a subject, recreates it, and makes it their own rather than merely adopting ideas from others."
+      "question": "What are the main components of the Transformer architecture?",
+      "ground_truth": "The Transformer consists of an encoder and decoder, each made of stacked layers containing multi-head self-attention mechanisms and position-wise fully connected feed-forward networks, with residual connections and layer normalization."
     },
     {
-      "question": "What role does memory play in the document?",
-      "ground_truth": "Memory plays a central role as the document reflects on past experiences, personal history, and how specific objects and artworks encapsulate a person's journey and persistence over time."
+      "question": "How does multi-head attention work?",
+      "ground_truth": "Multi-head attention linearly projects queries, keys and values h times with different learned projections, performs attention in parallel on each projection, then concatenates and projects the results, allowing the model to attend to information from different representation subspaces."
     },
     {
-      "question": "How is originality discussed in the document?",
-      "ground_truth": "Originality is discussed in contrast to mere adoption of ideas. The document suggests true originality comes from deeply absorbing and recreating a subject rather than copying or borrowing from others."
+      "question": "Why did the authors use positional encoding?",
+      "ground_truth": "Since the Transformer contains no recurrence or convolution, positional encodings are added to input embeddings to inject information about the relative or absolute position of tokens in the sequence."
     },
     {
-      "question": "What is the significance of the artwork mentioned in the document?",
-      "ground_truth": "The artwork is significant because it encapsulates the author's personal history and persistence, representing a genuine creative connection rather than simple imitation."
+      "question": "What were the main results and advantages of the Transformer over previous models?",
+      "ground_truth": "The Transformer achieved state-of-the-art results on machine translation tasks while being significantly more parallelizable and requiring less training time than recurrent or convolutional models."
     }
   ]
 }

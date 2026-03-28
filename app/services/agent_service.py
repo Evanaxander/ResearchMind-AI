@@ -1,31 +1,28 @@
 from typing import TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 
 from app.services.rag_service import RAGService
 from app.models.schemas import SourceChunk
-from app.core.config import settings
 
 
 # ── Shared state passed between all agents ────────────────────────────────────
 
 class ResearchState(TypedDict):
-    question: str                    # original user question
-    sub_tasks: List[str]             # planner breaks question into these
-    retrieved_chunks: List[dict]     # researcher fills this
-    answer: str                      # synthesizer writes this
-    sources: List[SourceChunk]       # final cited sources
-    agent_steps: List[str]           # trace of what each agent did
-    doc_ids: Optional[List[str]]     # optional filter by document
+    question: str
+    sub_tasks: List[str]
+    retrieved_chunks: List[dict]
+    answer: str
+    sources: List[SourceChunk]
+    agent_steps: List[str]
+    doc_ids: Optional[List[str]]
 
 
 # ── LLM and RAG shared across agents ─────────────────────────────────────────
 
-llm = ChatOpenAI(
-    model="gpt-4o-mini",
+llm = ChatOllama(
+    model="mistral",
     temperature=0.2,
-    api_key=settings.OPENAI_API_KEY,
 )
 rag = RAGService()
 
@@ -36,36 +33,30 @@ def planner_agent(state: ResearchState) -> ResearchState:
     """
     Reads the user question and breaks it into 2-4 focused sub-tasks.
     Each sub-task becomes a separate FAISS search query.
-    This means complex questions get multiple targeted searches
-    instead of one broad retrieval.
     """
     question = state["question"]
 
-    messages = [
-        SystemMessage(content="""You are a research planner. 
-Your job is to break a complex question into 2-4 specific search queries.
+    prompt = f"""You are a research planner.
+Break this question into 2-4 specific search queries.
 Each query should target a different aspect of the question.
-Return ONLY a numbered list, one query per line. Nothing else."""),
-        HumanMessage(content=f"Question: {question}"),
-    ]
+Return ONLY a numbered list, one query per line. Nothing else.
 
-    response = llm.invoke(messages)
+Question: {question}"""
+
+    response = llm.invoke(prompt)
     raw = response.content.strip()
 
-    # Parse numbered list into clean sub-tasks
     sub_tasks = []
     for line in raw.split("\n"):
         line = line.strip()
         if not line:
             continue
-        # Remove leading numbers like "1." or "1)"
         if line[0].isdigit():
             line = line.split(".", 1)[-1].strip()
             line = line.split(")", 1)[-1].strip()
         if line:
             sub_tasks.append(line)
 
-    # Fallback — if parsing failed, just use the original question
     if not sub_tasks:
         sub_tasks = [question]
 
@@ -83,8 +74,7 @@ Return ONLY a numbered list, one query per line. Nothing else."""),
 def researcher_agent(state: ResearchState) -> ResearchState:
     """
     Runs a FAISS search for each sub-task from the planner.
-    Collects all retrieved chunks, deduplicates by content,
-    and stores them in the shared state for the synthesizer.
+    Collects and deduplicates all retrieved chunks.
     """
     sub_tasks = state["sub_tasks"]
     doc_ids = state.get("doc_ids")
@@ -96,7 +86,6 @@ def researcher_agent(state: ResearchState) -> ResearchState:
 
         for doc, score in results:
             text = doc.page_content.strip()
-            # Deduplicate — same chunk can appear in multiple searches
             if text in seen_texts:
                 continue
             seen_texts.add(text)
@@ -124,9 +113,8 @@ def researcher_agent(state: ResearchState) -> ResearchState:
 
 def synthesizer_agent(state: ResearchState) -> ResearchState:
     """
-    Reads all retrieved chunks and writes a comprehensive answer.
-    Cites sources by filename and chunk index.
-    Only uses information from the retrieved context — no hallucination.
+    Reads all retrieved chunks and writes a comprehensive cited answer.
+    Only uses information from the retrieved context.
     """
     question = state["question"]
     chunks = state["retrieved_chunks"]
@@ -144,30 +132,27 @@ def synthesizer_agent(state: ResearchState) -> ResearchState:
             ],
         }
 
-    # Build context block from all retrieved chunks
     context = "\n\n---\n\n".join(
         f"[Source: {c['filename']}, chunk {c['chunk_index']}]\n{c['text']}"
         for c in chunks
     )
 
-    messages = [
-        SystemMessage(content="""You are a research synthesizer.
+    prompt = f"""You are a research synthesizer.
 Answer the question using ONLY the provided context.
 Be comprehensive but concise.
 Always cite your sources using [filename, chunk N] format.
-If the context doesn't contain enough information, say so clearly."""),
-        HumanMessage(content=f"""CONTEXT:
+If the context does not contain enough information, say so clearly.
+
+CONTEXT:
 {context}
 
 QUESTION:
 {question}
 
-Write a well-structured answer with citations:"""),
-    ]
+Write a well-structured answer with citations:"""
 
-    response = llm.invoke(messages)
+    response = llm.invoke(prompt)
 
-    # Convert raw chunks to SourceChunk objects for the response
     sources = [
         SourceChunk(
             doc_id=c["doc_id"],
@@ -192,18 +177,12 @@ Write a well-structured answer with citations:"""),
 # ── Build the LangGraph graph ─────────────────────────────────────────────────
 
 def build_research_graph():
-    """
-    Assembles the three agents into a LangGraph StateGraph.
-    Flow: planner → researcher → synthesizer → END
-    """
     graph = StateGraph(ResearchState)
 
-    # Register each agent as a node
     graph.add_node("planner", planner_agent)
     graph.add_node("researcher", researcher_agent)
     graph.add_node("synthesizer", synthesizer_agent)
 
-    # Define the flow
     graph.set_entry_point("planner")
     graph.add_edge("planner", "researcher")
     graph.add_edge("researcher", "synthesizer")
@@ -212,5 +191,4 @@ def build_research_graph():
     return graph.compile()
 
 
-# Compiled graph — imported by QueryService
 research_graph = build_research_graph()

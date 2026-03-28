@@ -5,12 +5,11 @@ from app.services.agent_service import research_graph
 class QueryService:
     """
     Phase 3: Delegates everything to the LangGraph multi-agent graph.
-    The graph runs: Planner → Researcher → Synthesizer.
+    Now runs fully locally using Ollama/Mistral — no API key needed.
     """
 
     async def answer(self, request: QueryRequest) -> QueryResponse:
 
-        # Initial state fed into the graph
         initial_state = {
             "question": request.question,
             "sub_tasks": [],
@@ -21,7 +20,6 @@ class QueryService:
             "doc_ids": request.doc_ids,
         }
 
-        # Run the full agent graph
         final_state = research_graph.invoke(initial_state)
 
         return QueryResponse(

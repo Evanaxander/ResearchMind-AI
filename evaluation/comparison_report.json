@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-03-28T06:14:16.510244",
+  "model": "mistral (local via Ollama)",
+  "scorer": "LLM-as-judge (synchronous)",
+  "scores": {
+    "Base LLM": {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_recall": "N/A"
+    },
+    "RAG only": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.96,
+      "context_recall": 0.94
+    },
+    "Multi-Agent RAG": {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_recall": 1.0
+    }
+  },
+  "improvements": {
+    "faithfulness_vs_base": "10000.0%",
+    "relevancy_vs_base": "0.0%"
+  }
+}
