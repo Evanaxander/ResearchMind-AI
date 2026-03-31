@@ -30,5 +30,21 @@
     "password_hash": "$2b$12$8TSt1.mvoBDSB5sihzD61Onx.cWT6FYsMAD2K7CawUwy.exjfENTG",
     "created_at": "2026-03-29T08:35:30.872614",
     "last_login": "2026-03-29T08:50:46.710667"
+  },
+  "Evanaxander": {
+    "username": "Evanaxander",
+    "email": "",
+    "role": "executive",
+    "password_hash": "$2b$12$bVaxSk/.i0fwckTotCeMnul7SrcrLOSIjDcq89jTGswaX9s9slSPi",
+    "created_at": "2026-03-31T05:10:24.908007",
+    "last_login": "2026-03-31T05:44:36.391301"
+  },
+  "Evan": {
+    "username": "Evan",
+    "email": "",
+    "role": "executive",
+    "password_hash": "$2b$12$tv2ltBsmXLPrKdW5Q2i7w.dqQvkQoc4XpMzj71585/Tbxk/1ISmhC",
+    "created_at": "2026-03-31T06:35:58.421736",
+    "last_login": "2026-03-31T06:36:01.034926"
   }
 }

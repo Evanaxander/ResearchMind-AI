@@ -47,6 +47,44 @@ function clearAuth() {
 	localStorage.removeItem(tokenStorageKey);
 }
 
+function uploadWithProgress(path, formData, token, onProgress) {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', `${API_BASE}${path}`);
+		if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+		xhr.upload.onprogress = (event) => {
+			if (!event.lengthComputable) return;
+			const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+			onProgress(percent);
+		};
+
+		xhr.onload = () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				try {
+					resolve(xhr.responseText ? JSON.parse(xhr.responseText) : null);
+				} catch {
+					resolve(null);
+				}
+				return;
+			}
+
+			let detail = `Request failed: ${xhr.status}`;
+			try {
+				const parsed = JSON.parse(xhr.responseText || '{}');
+				detail = parsed?.detail || parsed?.message || detail;
+			} catch {
+				// keep default detail
+			}
+			reject(new Error(detail));
+		};
+
+		xhr.onerror = () => reject(new Error('Network error during upload.'));
+		xhr.onabort = () => reject(new Error('Upload was canceled.'));
+		xhr.send(formData);
+	});
+}
+
 async function apiFetch(path, options = {}, token) {
 	const headers = new Headers(options.headers || {});
 	if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -92,32 +130,52 @@ function App() {
 	const [docsLoading, setDocsLoading] = useState(false);
 	const [uploading, setUploading] = useState(false);
 	const [uploadMessage, setUploadMessage] = useState('');
+	const [uploadPercent, setUploadPercent] = useState(0);
 	const [selectedDocIds, setSelectedDocIds] = useState([]);
 
 	const [question, setQuestion] = useState('');
 	const [queryResult, setQueryResult] = useState(null);
 	const [queryError, setQueryError] = useState('');
 	const [queryLoading, setQueryLoading] = useState(false);
-	const [topK, setTopK] = useState(5);
+	const [topK, setTopK] = useState(3);
+	const [showAnalysis, setShowAnalysis] = useState(false);
 
 	const candidates = useMemo(
-		() => [
-			'/health',
-			'http://127.0.0.1:8010/health',
-			'http://localhost:8010/health',
-			'http://127.0.0.1:8000/health',
-			'http://localhost:8000/health',
-		],
+		() => {
+			const list = [];
+			if (API_BASE) list.push(`${API_BASE}/health`);
+			list.push('/health', 'http://127.0.0.1:8010/health', 'http://localhost:8010/health');
+			return [...new Set(list)];
+		},
 		[]
 	);
 
 	const authToken = auth?.access_token || '';
 
 	const checkHealth = useCallback(async (signal) => {
+		const fetchWithTimeout = async (url, timeoutMs = 4500) => {
+			const timeoutController = new AbortController();
+			const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+			if (signal) {
+				if (signal.aborted) {
+					clearTimeout(timeoutId);
+					throw new DOMException('Aborted', 'AbortError');
+				}
+				signal.addEventListener('abort', () => timeoutController.abort(), { once: true });
+			}
+
+			try {
+				return await fetch(url, { signal: timeoutController.signal });
+			} finally {
+				clearTimeout(timeoutId);
+			}
+		};
+
 		let lastError = 'No response from backend';
 		for (const url of candidates) {
 			try {
-				const res = await fetch(url, { signal });
+				const res = await fetchWithTimeout(url);
 				if (!res.ok) {
 					lastError = `${url} returned ${res.status}`;
 					continue;
@@ -133,7 +191,8 @@ function App() {
 				return;
 			} catch (error) {
 				if (error.name === 'AbortError') {
-					return;
+					lastError = `${url} timed out`;
+					continue;
 				}
 				lastError = `${url} failed: ${error.message}`;
 			}
@@ -221,20 +280,35 @@ function App() {
 
 		setUploading(true);
 		setUploadMessage('');
+		setUploadPercent(0);
 		try {
 			const formData = new FormData();
 			formData.append('file', file);
-			const data = await apiFetch('/api/v1/upload', {
-				method: 'POST',
-				body: formData,
-			}, authToken);
-			setUploadMessage(data?.message || 'Upload completed.');
+			const data = await uploadWithProgress('/api/v1/upload', formData, authToken, setUploadPercent);
+			setUploadPercent(100);
+			setUploadMessage(data?.message || 'Upload complete. File was processed successfully.');
 			event.target.reset();
 			await loadDocuments();
 		} catch (error) {
+			setUploadPercent(0);
 			setUploadMessage(`Upload failed: ${error.message}`);
 		} finally {
 			setUploading(false);
+		}
+	};
+
+	const handleDeleteDocument = async (docId, filename) => {
+		if (!window.confirm(`Delete ${filename}? This removes its search index too.`)) return;
+		setUploadMessage('');
+		try {
+			await apiFetch(`/api/v1/documents/${docId}`, {
+				method: 'DELETE',
+			}, authToken);
+			setUploadMessage(`Deleted ${filename}.`);
+			setSelectedDocIds((prev) => prev.filter((id) => id !== docId));
+			await loadDocuments();
+		} catch (error) {
+			setUploadMessage(`Delete failed: ${error.message}`);
 		}
 	};
 
@@ -243,6 +317,9 @@ function App() {
 		setQueryLoading(true);
 		setQueryError('');
 		setQueryResult(null);
+		setShowAnalysis(false);
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 180000);
 		try {
 			const payload = {
 				question,
@@ -253,12 +330,18 @@ function App() {
 			const data = await apiFetch('/api/v1/query', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
+				signal: controller.signal,
 				body: JSON.stringify(payload),
 			}, authToken);
 			setQueryResult(data);
 		} catch (error) {
-			setQueryError(error.message);
+			if (error.name === 'AbortError') {
+				setQueryError('Response took too long. Try Top K = 3, fewer selected files, or ask a narrower question.');
+			} else {
+				setQueryError(error.message);
+			}
 		} finally {
+			clearTimeout(timeout);
 			setQueryLoading(false);
 		}
 	};
@@ -297,6 +380,22 @@ function App() {
 		if (health.loading) return 'status pending';
 		return health.ok ? 'status good' : 'status bad';
 	}, [health]);
+
+	const referenceSources = useMemo(() => queryResult?.sources || [], [queryResult]);
+
+	const answerWithNumericRefs = useMemo(() => {
+		if (!queryResult?.answer) return '';
+		const refs = referenceSources;
+		const normalized = queryResult.answer.replace(/\[(.+?),\s*chunk\s*(\d+)\]/gi, (full, filename, chunk) => {
+			const idx = refs.findIndex(
+				(s) =>
+					String(s.filename).trim().toLowerCase() === String(filename).trim().toLowerCase()
+					&& Number(s.chunk_index) === Number(chunk)
+			);
+			return idx >= 0 ? `[${idx + 1}]` : full;
+		});
+		return normalized;
+	}, [queryResult, referenceSources]);
 
 	if (!auth) {
 		return (
@@ -466,6 +565,14 @@ function App() {
 							<input type="file" name="file" accept=".pdf,.txt,.docx" required />
 							<button type="submit" disabled={uploading}>Upload File</button>
 						</form>
+						{uploading ? (
+							<div className="progress-wrap" aria-live="polite">
+								<div className="progress-label">Uploading: {uploadPercent}%</div>
+								<div className="progress-track">
+									<div className="progress-fill" style={{ width: `${uploadPercent}%` }} />
+								</div>
+							</div>
+						) : null}
 						<p className="small-note">Accepted formats: PDF, TXT, DOCX.</p>
 						{uploadMessage ? <p className="small-note">{uploadMessage}</p> : null}
 					</article>
@@ -480,14 +587,23 @@ function App() {
 								<p className="small-note">No documents uploaded yet.</p>
 							) : null}
 							{docs.map((doc) => (
-								<label key={doc.doc_id} className="doc-item">
-									<input
-										type="checkbox"
-										checked={selectedDocIds.includes(doc.doc_id)}
-										onChange={() => toggleDocSelection(doc.doc_id)}
-									/>
-									<span>{doc.filename}</span>
-								</label>
+								<div key={doc.doc_id} className="doc-item">
+									<label className="doc-main">
+										<input
+											type="checkbox"
+											checked={selectedDocIds.includes(doc.doc_id)}
+											onChange={() => toggleDocSelection(doc.doc_id)}
+										/>
+										<span>{doc.filename}</span>
+									</label>
+									<button
+										type="button"
+										className="danger-btn"
+										onClick={() => handleDeleteDocument(doc.doc_id, doc.filename)}
+									>
+										Delete
+									</button>
+								</div>
 							))}
 						</div>
 					</article>
@@ -515,32 +631,60 @@ function App() {
 							<button type="submit" disabled={queryLoading}>Analyze</button>
 						</form>
 
-						{queryError ? <p className="small-note">{queryError}</p> : null}
+						{queryLoading ? <p className="small-note">Analyzing documents and preparing response...</p> : null}
 
-						{queryResult ? (
-							<div className="result-box">
-								<h3>Answer</h3>
-								<p>{queryResult.answer}</p>
-								{queryResult.analysis ? (
-									<>
-										<h3>Analysis</h3>
-										<p>{queryResult.analysis}</p>
-									</>
-								) : null}
-								<h3>Citations</h3>
-								<ul>
-									{(queryResult.sources || []).map((source, idx) => (
-										<li key={`${source.doc_id}-${source.chunk_index}-${idx}`}>
-											<strong>{source.filename}</strong> chunk {source.chunk_index} (score{' '}
-											{Number(source.score).toFixed(3)})
-											<div>{source.text}</div>
-										</li>
-									))}
-								</ul>
-							</div>
-						) : null}
+						{queryError ? <p className="small-note">{queryError}</p> : null}
 					</article>
 				</section>
+
+				{queryResult ? (
+					<section className="response-stage">
+						<div className="response-header">
+							<h2>Response</h2>
+							<div className="response-badges">
+								<span>{queryResult.query_type || 'general'} query</span>
+								<span>{referenceSources.length} citations</span>
+								{queryResult.latency_ms ? <span>{queryResult.latency_ms} ms</span> : null}
+							</div>
+						</div>
+
+						<div className="result-box result-box-large">
+							<h3>Answer</h3>
+							<p className="answer-body">{answerWithNumericRefs}</p>
+							{referenceSources.length ? (
+								<div className="inline-refs" aria-label="References">
+									{referenceSources.map((_, idx) => (
+										<span key={`ref-pill-${idx}`}>[{idx + 1}]</span>
+									))}
+								</div>
+							) : null}
+							{queryResult.analysis ? (
+								<>
+									<button
+										type="button"
+										className="analysis-toggle"
+										onClick={() => setShowAnalysis((prev) => !prev)}
+									>
+										{showAnalysis ? 'Hide technical analysis' : 'Show technical analysis'}
+									</button>
+									{showAnalysis ? <p>{queryResult.analysis}</p> : null}
+								</>
+							) : null}
+							<h3>References</h3>
+							<div className="citation-grid">
+								{referenceSources.map((source, idx) => (
+									<div className="citation-card" key={`${source.doc_id}-${source.chunk_index}-${idx}`}>
+										<div className="citation-title">
+											<strong>[{idx + 1}] {source.filename}</strong>
+											<span>chunk {source.chunk_index} | relevance {Number(source.score).toFixed(3)}</span>
+										</div>
+										<div>{source.text}</div>
+									</div>
+								))}
+							</div>
+						</div>
+					</section>
+				) : null}
 
 				<footer className="hint">
 					If health is red, restart backend with: python -m uvicorn app.main:app --reload --port 8010

@@ -4,6 +4,7 @@ from typing import TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
 from langchain_ollama import ChatOllama
 
+from app.core.config import settings
 from app.services.rag_service import RAGService
 from app.models.schemas import SourceChunk
 
@@ -44,6 +45,11 @@ def _invoke_llm(prompt: str) -> tuple[Optional[str], Optional[str]]:
         return None, str(e)
 
 
+def _clean_text_excerpt(text: str, max_len: int = 220) -> str:
+    cleaned = " ".join((text or "").split())
+    return (cleaned[:max_len] + "...") if len(cleaned) > max_len else cleaned
+
+
 # ── Query type classifier ─────────────────────────────────────────────────────
 
 def classify_query(question: str) -> str:
@@ -76,6 +82,17 @@ def financial_planner(state: FinancialResearchState) -> FinancialResearchState:
     """
     question   = state["question"]
     query_type = classify_query(question)
+    fast_mode = settings.FAST_QUERY_MODE
+
+    if fast_mode:
+        return {
+            **state,
+            "query_type": query_type,
+            "sub_tasks": [question],
+            "agent_steps": state["agent_steps"] + [
+                "[Planner] Fast mode enabled: using direct query without LLM planning"
+            ],
+        }
 
     domain_mode = state.get("domain_mode", "general")
     domain_guidance = (
@@ -116,6 +133,7 @@ Return ONLY a numbered list, one query per line."""
 
     if not sub_tasks:
         sub_tasks = [question]
+    sub_tasks = sub_tasks[:settings.QUERY_MAX_SUBTASKS]
 
     planner_note = (
         f" [Planner fallback used: {planner_error}]"
@@ -146,6 +164,8 @@ def financial_researcher(state: FinancialResearchState) -> FinancialResearchStat
     period_filter  = (state.get("period_filter") or "").strip().lower()
     type_filter    = (state.get("doc_type_filter") or "").strip().lower()
     top_k          = max(2, min(int(state.get("top_k", 5) or 5), 12))
+    if settings.FAST_QUERY_MODE:
+        top_k = min(top_k, settings.FAST_TOP_K_CAP)
     all_chunks     = []
     seen_texts     = set()
 
@@ -205,6 +225,15 @@ def financial_analyst(state: FinancialResearchState) -> FinancialResearchState:
     chunks     = state["retrieved_chunks"]
     domain_mode = state.get("domain_mode", "general")
 
+    if settings.FAST_QUERY_MODE:
+        return {
+            **state,
+            "analysis": "",
+            "agent_steps": state["agent_steps"] + [
+                "[Analyst] Fast mode enabled: skipped LLM analysis pass"
+            ],
+        }
+
     if not chunks:
         return {
             **state,
@@ -217,7 +246,7 @@ def financial_analyst(state: FinancialResearchState) -> FinancialResearchState:
     context = "\n\n---\n\n".join(
         f"[{c['filename']} | {c['doc_type']} | "
         f"Period: {c['fiscal_period']} | Tables: {c['has_tables']}]\n{c['text']}"
-        for c in chunks[:8]
+        for c in chunks[:settings.ANALYST_CONTEXT_CHUNKS]
     )
 
     if query_type == "metric":
@@ -312,6 +341,36 @@ def financial_synthesizer(state: FinancialResearchState) -> FinancialResearchSta
     analysis   = state["analysis"]
     domain_mode = state.get("domain_mode", "general")
 
+    if settings.FAST_QUERY_MODE and chunks:
+        top = chunks[:3]
+        citations = " ".join(f"[{c['filename']}, chunk {c['chunk_index']}]" for c in top)
+        snippets = " ".join(_clean_text_excerpt(c["text"], 180) for c in top[:2]).strip()
+        quick_answer = (
+            "Direct answer based on retrieved evidence: "
+            f"{snippets} {citations} "
+            "(Fast mode is enabled; disable FAST_QUERY_MODE for deeper synthesized reasoning.)"
+        )
+
+        sources = [
+            SourceChunk(
+                doc_id=c["doc_id"],
+                filename=c["filename"],
+                chunk_index=c["chunk_index"],
+                text=c["text"],
+                score=c["score"],
+            )
+            for c in chunks
+        ]
+
+        return {
+            **state,
+            "answer": quick_answer,
+            "sources": sources,
+            "agent_steps": state["agent_steps"] + [
+                "[Synthesizer] Fast mode enabled: returned extractive answer without LLM synthesis"
+            ],
+        }
+
     if not chunks:
         return {
             **state,
@@ -328,7 +387,7 @@ def financial_synthesizer(state: FinancialResearchState) -> FinancialResearchSta
     context = "\n\n---\n\n".join(
         f"[Source: {c['filename']}, chunk {c['chunk_index']}, "
         f"period: {c['fiscal_period']}]\n{c['text']}"
-        for c in chunks[:6]
+        for c in chunks[:settings.SYNTH_CONTEXT_CHUNKS]
     )
 
     prompt = f"""You are a senior analyst writing a research response.

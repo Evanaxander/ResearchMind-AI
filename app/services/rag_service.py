@@ -38,6 +38,7 @@ class RAGService:
             chunk_overlap=settings.CHUNK_OVERLAP,
             separators=["\n\n", "\n", ".", " "],
         )
+        self._store_cache: dict[str, FAISS] = {}
 
     # ── Index a document on upload ────────────────────────────────
 
@@ -97,28 +98,22 @@ class RAGService:
         if not targets:
             return []
 
-        # Merge all relevant indexes into one search
-        combined_store = None
-        for doc_id in targets:
-            index_path = self.index_dir / doc_id
-            index_file = index_path / "index.faiss"
-            if not index_file.exists():
-                continue
-            store = FAISS.load_local(
-                str(index_path),
-                self.embeddings,
-                allow_dangerous_deserialization=True,
-            )
-            if combined_store is None:
-                combined_store = store
-            else:
-                combined_store.merge_from(store)
+        # Search each doc index independently and combine top global matches.
+        # This avoids repeatedly merging FAISS stores on every query.
+        all_results: List[Tuple[Document, float]] = []
+        per_doc_k = max(1, min(top_k, 4))
 
-        if combined_store is None:
+        for doc_id in targets:
+            store = self._get_or_load_store(doc_id)
+            if store is None:
+                continue
+            all_results.extend(store.similarity_search_with_score(question, k=per_doc_k))
+
+        if not all_results:
             return []
 
-        results = combined_store.similarity_search_with_score(question, k=top_k)
-        return results
+        all_results.sort(key=lambda item: item[1])
+        return all_results[:top_k]
 
     # ── Delete an index ───────────────────────────────────────────
 
@@ -128,6 +123,7 @@ class RAGService:
         if index_path.exists():
             import shutil
             shutil.rmtree(index_path)
+        self._store_cache.pop(doc_id, None)
 
     # ── Internal helpers ──────────────────────────────────────────
 
@@ -156,3 +152,20 @@ class RAGService:
             for p in self.index_dir.iterdir()
             if p.is_dir() and (p / "index.faiss").exists()
         ]
+
+    def _get_or_load_store(self, doc_id: str) -> FAISS | None:
+        if doc_id in self._store_cache:
+            return self._store_cache[doc_id]
+
+        index_path = self.index_dir / doc_id
+        index_file = index_path / "index.faiss"
+        if not index_file.exists():
+            return None
+
+        store = FAISS.load_local(
+            str(index_path),
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
+        self._store_cache[doc_id] = store
+        return store
