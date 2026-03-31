@@ -22,6 +22,11 @@ from langchain.schema import Document
 # ── Document type detection ───────────────────────────────────────────────────
 
 DOCUMENT_TYPES = {
+    "policy":     ["policy", "standard operating procedure", "sop", "guideline"],
+    "contract":   ["agreement", "contract", "terms and conditions", "msa"],
+    "technical":  ["architecture", "api", "system design", "technical specification"],
+    "research":   ["methodology", "literature review", "findings", "abstract"],
+    "report":     ["report", "executive summary", "conclusion", "appendix"],
     "10-K":       ["annual report", "form 10-k", "10-k filing"],
     "10-Q":       ["quarterly report", "form 10-q", "10-q filing"],
     "earnings":   ["earnings call", "conference call", "q1 ", "q2 ", "q3 ", "q4 "],
@@ -35,6 +40,11 @@ FINANCIAL_METRICS = [
     "ebitda", "eps", "earnings per share", "free cash flow",
     "total assets", "total liabilities", "debt", "equity",
     "guidance", "outlook", "margin", "return on equity",
+]
+
+GENERAL_SIGNALS = [
+    "summary", "objective", "scope", "methodology", "findings", "recommendation",
+    "risk", "timeline", "budget", "governance", "compliance", "kpi", "roadmap",
 ]
 
 
@@ -67,9 +77,15 @@ class FinancialParser:
     - Creates finance-aware chunks that don't split tables
     """
 
-    def __init__(self, chunk_size: int = 600, chunk_overlap: int = 100):
+    def __init__(
+        self,
+        chunk_size: int = 600,
+        chunk_overlap: int = 100,
+        domain_mode: str = "general",
+    ):
         self.chunk_size    = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.domain_mode   = domain_mode.lower().strip()
 
     def parse(self, file_path: Path, filename: str) -> ParsedDocument:
         """
@@ -129,8 +145,9 @@ class FinancialParser:
 
         # Enrich with detected metadata
         doc.doc_type      = self._detect_doc_type(raw_text, filename)
-        doc.ticker        = self._extract_ticker(raw_text, filename)
-        doc.fiscal_period = self._extract_fiscal_period(raw_text)
+        if self.domain_mode == "finance":
+            doc.ticker        = self._extract_ticker(raw_text, filename)
+            doc.fiscal_period = self._extract_fiscal_period(raw_text)
         doc.metrics_found = self._find_metrics(raw_text)
         doc.chunks        = self._create_chunks(doc, filename)
 
@@ -144,8 +161,9 @@ class FinancialParser:
 
         doc = ParsedDocument(raw_text=raw_text, page_count=1)
         doc.doc_type      = self._detect_doc_type(raw_text, filename)
-        doc.ticker        = self._extract_ticker(raw_text, filename)
-        doc.fiscal_period = self._extract_fiscal_period(raw_text)
+        if self.domain_mode == "finance":
+            doc.ticker        = self._extract_ticker(raw_text, filename)
+            doc.fiscal_period = self._extract_fiscal_period(raw_text)
         doc.metrics_found = self._find_metrics(raw_text)
         doc.chunks        = self._create_chunks(doc, filename)
 
@@ -159,8 +177,9 @@ class FinancialParser:
 
         doc = ParsedDocument(raw_text=raw_text, page_count=1)
         doc.doc_type      = self._detect_doc_type(raw_text, filename)
-        doc.ticker        = self._extract_ticker(raw_text, filename)
-        doc.fiscal_period = self._extract_fiscal_period(raw_text)
+        if self.domain_mode == "finance":
+            doc.ticker        = self._extract_ticker(raw_text, filename)
+            doc.fiscal_period = self._extract_fiscal_period(raw_text)
         doc.metrics_found = self._find_metrics(raw_text)
         doc.chunks        = self._create_chunks(doc, filename)
 
@@ -264,6 +283,7 @@ class FinancialParser:
             "fiscal_period": doc.fiscal_period or "unknown",
             "metrics_found": ",".join(doc.metrics_found[:5]),
             "has_tables":    len(doc.tables) > 0,
+            "domain_mode":   self.domain_mode,
             "section_idx":   section_idx,
             "chunk_index":   chunk_idx,
         }
@@ -322,9 +342,10 @@ class FinancialParser:
         return None
 
     def _find_metrics(self, text: str) -> list[str]:
-        """Return list of financial metrics mentioned in the document."""
+        """Return key signal terms based on the active domain mode."""
         text_lower = text.lower()
-        return [m for m in FINANCIAL_METRICS if m in text_lower]
+        terms = FINANCIAL_METRICS if self.domain_mode == "finance" else GENERAL_SIGNALS
+        return [m for m in terms if m in text_lower]
 
     def _table_to_markdown(self, table: list[list], page_num: int) -> str:
         """

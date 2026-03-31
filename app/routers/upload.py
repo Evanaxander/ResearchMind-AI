@@ -9,10 +9,11 @@ router = APIRouter()
 
 
 class FullUploadResponse(BaseModel):
-    """Extended upload response including financial analysis."""
+    """Extended upload response including optional enrichment summary."""
     success:              bool
     message:              str
     document:             DocumentMetadata
+    document_summary:     Optional[str]  = None
     financial_summary:    Optional[str]  = None
     contradictions_found: int            = 0
     contradictions:       List[dict]     = []
@@ -28,16 +29,14 @@ async def upload_document(
     service: DocumentService = Depends(get_document_service),
 ):
     """
-    Upload a financial document (PDF, TXT, DOCX).
+    Upload and process a document (PDF, TXT, DOCX).
 
-    FinanceIQ automatically:
-    - Detects document type (10-K, 10-Q, earnings call, analyst report)
-    - Extracts ticker symbol and fiscal period
+    The pipeline automatically:
+    - Detects broad document type from content and filename
     - Preserves table structure during chunking
-    - Extracts key financial metrics (revenue, EPS, margins, guidance)
-    - Adds document to the knowledge graph
-    - Detects contradictions with existing related documents
-    - Returns a full financial summary immediately
+    - Indexes chunks for retrieval
+    - Adds document metadata to the graph
+    - Optionally runs domain-specific enrichment (finance mode)
     """
     allowed_types = {
         "application/pdf",
@@ -61,7 +60,7 @@ async def upload_document(
                    f"Max: {settings.MAX_UPLOAD_SIZE_MB} MB."
         )
 
-    doc_meta, financial_summary, contradictions = await service.save_document(
+    doc_meta, document_summary, contradictions = await service.save_document(
         filename     = file.filename,
         contents     = contents,
         content_type = file.content_type,
@@ -79,7 +78,8 @@ async def upload_document(
         success              = True,
         message              = message,
         document             = doc_meta,
-        financial_summary    = financial_summary,
+        document_summary     = document_summary,
+        financial_summary    = document_summary,
         contradictions_found = len(contradictions),
         contradictions       = contradictions,
     )

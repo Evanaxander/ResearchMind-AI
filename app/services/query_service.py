@@ -1,5 +1,6 @@
 from app.models.schemas import QueryRequest, QueryResponse
 from app.services.financial_agent import financial_graph
+from app.core.config import settings
 
 
 class QueryService:
@@ -21,8 +22,11 @@ class QueryService:
             "sources":          [],
             "agent_steps":      [],
             "doc_ids":          request.doc_ids,
+            "top_k":            request.top_k,
+            "doc_type_filter":  request.doc_type_filter,
             "ticker_filter":    request.ticker_filter,
             "period_filter":    request.period_filter,
+            "domain_mode":      settings.ANALYSIS_DOMAIN,
         }
 
         final_state = financial_graph.invoke(initial_state)

@@ -41,7 +41,7 @@ class QueryRequest(BaseModel):
         ...,
         min_length=3,
         max_length=2000,
-        description="Your financial research question"
+        description="Your question about uploaded documents"
     )
     doc_ids:       Optional[List[str]] = Field(
         default=None,
@@ -49,18 +49,18 @@ class QueryRequest(BaseModel):
     )
     top_k:         int = Field(default=5, ge=1, le=20)
 
-    # ── Financial filters (new in FinanceIQ) ──────────────────────────────
+    # ── Optional metadata filters ──────────────────────────────────────────
     ticker_filter: Optional[str] = Field(
         default=None,
-        description="Filter by ticker symbol e.g. AAPL"
+        description="Optional finance-mode filter by ticker symbol (e.g. AAPL)"
     )
     period_filter: Optional[str] = Field(
         default=None,
-        description="Filter by fiscal period e.g. FY2023"
+        description="Optional finance-mode filter by period (e.g. FY2023)"
     )
     doc_type_filter: Optional[str] = Field(
         default=None,
-        description="Filter by document type: 10-K, 10-Q, earnings, analyst"
+        description="Filter by inferred document type (e.g. report, policy, 10-K)"
     )
 
 

@@ -1,15 +1,4 @@
-"""
-Financial Agent Service
-------------------------
-Finance-aware LangGraph agent pipeline with four specialized agents:
-
-  Planner    → understands financial query types and plans searches
-  Researcher → retrieves relevant chunks with financial metadata filtering
-  Analyst    → performs quantitative analysis and contradiction detection
-  Synthesizer → writes professional financial-grade answers with citations
-
-This replaces the generic agent_service.py for financial use cases.
-"""
+"""Domain-aware LangGraph pipeline used for general and finance modes."""
 
 from typing import TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
@@ -31,8 +20,11 @@ class FinancialResearchState(TypedDict):
     sources:           List[SourceChunk]
     agent_steps:       List[str]
     doc_ids:           Optional[List[str]]
+    top_k:             int
+    doc_type_filter:   Optional[str]
     ticker_filter:     Optional[str]
     period_filter:     Optional[str]
+    domain_mode:       str
 
 
 # ── Shared resources ──────────────────────────────────────────────────────────
@@ -56,7 +48,7 @@ def _invoke_llm(prompt: str) -> tuple[Optional[str], Optional[str]]:
 
 def classify_query(question: str) -> str:
     """
-    Classify the financial query type so the Planner
+    Classify the query type so the Planner
     can use the right search strategy.
 
     metric     → looking for a specific number (revenue, EPS, etc.)
@@ -70,8 +62,8 @@ def classify_query(question: str) -> str:
         return "comparison"
     if any(w in q for w in ["risk", "concern", "warn", "threat", "challenge", "uncertain"]):
         return "risk"
-    if any(w in q for w in ["revenue", "income", "profit", "eps", "ebitda", "margin",
-                              "cash", "debt", "guidance", "earnings", "sales"]):
+    if any(w in q for w in ["revenue", "income", "profit", "eps", "margin", "kpi", "metric",
+                            "count", "rate", "budget", "cost", "sales", "growth"]):
         return "metric"
     return "general"
 
@@ -80,30 +72,31 @@ def classify_query(question: str) -> str:
 
 def financial_planner(state: FinancialResearchState) -> FinancialResearchState:
     """
-    Finance-aware query planner.
-
-    Unlike the generic planner, this understands financial document
-    structure and generates targeted sub-queries based on query type:
-
-    - Metric queries: searches for the number AND its context
-    - Comparison queries: generates one search per time period
-    - Risk queries: searches risk factors section specifically
-    - General queries: broad multi-aspect search
+    Domain-aware query planner.
     """
     question   = state["question"]
     query_type = classify_query(question)
 
-    prompt = f"""You are a financial research analyst planning document searches.
+    domain_mode = state.get("domain_mode", "general")
+    domain_guidance = (
+        "Use finance terminology (ticker, fiscal period, guidance) when relevant."
+        if domain_mode == "finance" else
+        "Use document-agnostic wording suitable for any report or policy corpus."
+    )
+
+    prompt = f"""You are a research analyst planning document searches.
 
 Query type: {query_type}
+Domain mode: {domain_mode}
 Question: {question}
 
-Generate 3-4 specific search queries to find the answer in financial documents.
+Generate 3-4 specific search queries to find the answer in uploaded documents.
 Consider:
 - For metrics: search for the number AND the surrounding context
 - For comparisons: generate separate queries for each time period
 - For risks: search for risk factors, challenges, and warnings
 - For general: cover different aspects of the question
+{domain_guidance}
 
 Return ONLY a numbered list, one query per line."""
 
@@ -145,21 +138,19 @@ Return ONLY a numbered list, one query per line."""
 
 def financial_researcher(state: FinancialResearchState) -> FinancialResearchState:
     """
-    Retrieves chunks with financial metadata awareness.
-
-    Key difference from generic researcher:
-    - Filters by ticker symbol if detected
-    - Filters by fiscal period if detected
-    - Prioritizes chunks that contain tables (has_tables=True)
-    - Deduplicates by content
+    Retrieves chunks with metadata awareness and lightweight filtering.
     """
     sub_tasks      = state["sub_tasks"]
     doc_ids        = state.get("doc_ids")
+    ticker_filter  = (state.get("ticker_filter") or "").strip().upper()
+    period_filter  = (state.get("period_filter") or "").strip().lower()
+    type_filter    = (state.get("doc_type_filter") or "").strip().lower()
+    top_k          = max(2, min(int(state.get("top_k", 5) or 5), 12))
     all_chunks     = []
     seen_texts     = set()
 
     for task in sub_tasks:
-        results = rag.search(task, doc_ids=doc_ids, top_k=4)
+        results = rag.search(task, doc_ids=doc_ids, top_k=top_k)
 
         for doc, score in results:
             text = doc.page_content.strip()
@@ -168,6 +159,14 @@ def financial_researcher(state: FinancialResearchState) -> FinancialResearchStat
             seen_texts.add(text)
 
             metadata = doc.metadata
+
+            if ticker_filter and str(metadata.get("ticker", "")).upper() != ticker_filter:
+                continue
+            if period_filter and period_filter not in str(metadata.get("fiscal_period", "")).lower():
+                continue
+            if type_filter and type_filter not in str(metadata.get("doc_type", "")).lower():
+                continue
+
             all_chunks.append({
                 "doc_id":        metadata.get("doc_id", "unknown"),
                 "filename":      metadata.get("filename", "unknown"),
@@ -181,8 +180,8 @@ def financial_researcher(state: FinancialResearchState) -> FinancialResearchStat
                 "has_tables":    metadata.get("has_tables", False),
             })
 
-    # Sort: tables first (they contain the numbers), then by score
-    all_chunks.sort(key=lambda x: (not x["has_tables"], -x["score"]))
+    # Keep table-rich chunks near the top while preserving score importance.
+    all_chunks.sort(key=lambda x: (x["score"], 0 if x["has_tables"] else 1))
 
     return {
         **state,
@@ -199,19 +198,12 @@ def financial_researcher(state: FinancialResearchState) -> FinancialResearchStat
 
 def financial_analyst(state: FinancialResearchState) -> FinancialResearchState:
     """
-    The most important addition over generic RAG.
-
-    This agent performs actual analysis on retrieved chunks:
-    - For metric queries: extracts and validates the numbers
-    - For comparison queries: computes changes and trends
-    - For risk queries: ranks and categorizes risks
-    - Detects contradictions between chunks from different documents
-
-    The analysis is passed to the Synthesizer as additional context.
+    Build intermediate reasoning notes for synthesis.
     """
     question   = state["question"]
     query_type = state["query_type"]
     chunks     = state["retrieved_chunks"]
+    domain_mode = state.get("domain_mode", "general")
 
     if not chunks:
         return {
@@ -229,11 +221,12 @@ def financial_analyst(state: FinancialResearchState) -> FinancialResearchState:
     )
 
     if query_type == "metric":
-        analysis_prompt = f"""You are a financial analyst extracting specific metrics.
+        analysis_prompt = f"""You are an analyst extracting evidence-backed metrics.
 
-From the context below, extract ALL relevant financial numbers for this question.
+From the context below, extract ALL relevant numbers and quantitative statements.
 Present them in a structured format with source citations.
 Flag any numbers that seem inconsistent or unusual.
+Domain mode: {domain_mode}
 
 QUESTION: {question}
 
@@ -243,7 +236,7 @@ CONTEXT:
 Extract the metrics:"""
 
     elif query_type == "comparison":
-        analysis_prompt = f"""You are a financial analyst performing comparative analysis.
+        analysis_prompt = f"""You are an analyst performing comparative analysis.
 
 From the context below, identify the metrics for EACH time period or entity.
 Calculate the percentage change where possible.
@@ -257,7 +250,7 @@ CONTEXT:
 Comparative analysis:"""
 
     elif query_type == "risk":
-        analysis_prompt = f"""You are a financial risk analyst.
+        analysis_prompt = f"""You are a risk analyst.
 
 From the context below, identify and categorize all risk factors.
 Rate each risk as HIGH/MEDIUM/LOW impact.
@@ -271,11 +264,12 @@ CONTEXT:
 Risk analysis:"""
 
     else:
-        analysis_prompt = f"""You are a financial research analyst.
+        analysis_prompt = f"""You are a research analyst.
 
 Analyze the context below to answer the question.
 Note any important patterns, trends, or insights.
 Flag any contradictions between different sources.
+    Domain mode: {domain_mode}
 
 QUESTION: {question}
 
@@ -310,26 +304,20 @@ Analysis:"""
 
 def financial_synthesizer(state: FinancialResearchState) -> FinancialResearchState:
     """
-    Writes professional financial-grade answers.
-
-    Uses both the raw retrieved chunks AND the analyst's analysis
-    to produce a response that reads like it came from a senior analyst:
-    - Leads with the direct answer
-    - Supports with specific numbers and citations
-    - Notes any caveats or data limitations
-    - Professional, concise tone
+    Writes concise evidence-backed answers for any report domain.
     """
     question   = state["question"]
     query_type = state["query_type"]
     chunks     = state["retrieved_chunks"]
     analysis   = state["analysis"]
+    domain_mode = state.get("domain_mode", "general")
 
     if not chunks:
         return {
             **state,
             "answer": (
                 "Insufficient data in uploaded documents to answer this question. "
-                "Please upload the relevant financial filings and try again."
+                "Please upload relevant source documents and try again."
             ),
             "sources": [],
             "agent_steps": state["agent_steps"] + [
@@ -343,10 +331,10 @@ def financial_synthesizer(state: FinancialResearchState) -> FinancialResearchSta
         for c in chunks[:6]
     )
 
-    prompt = f"""You are a senior financial analyst writing a research note.
+    prompt = f"""You are a senior analyst writing a research response.
 
 Answer the question using the retrieved context and analysis below.
-Write in a professional, concise tone suitable for institutional investors.
+Write in a professional, concise tone.
 
 Requirements:
 - Lead with the direct answer in the first sentence
@@ -354,6 +342,7 @@ Requirements:
 - Include relevant numbers when available
 - Note any data limitations or caveats at the end
 - Keep the response focused and under 400 words
+Domain mode: {domain_mode}
 
 QUERY TYPE: {query_type}
 QUESTION: {question}
@@ -406,12 +395,8 @@ Professional response:"""
 
 def build_financial_graph():
     """
-    Four-agent financial research pipeline:
+    Four-agent research pipeline:
     Planner → Researcher → Analyst → Synthesizer
-
-    The Analyst agent is the key addition over generic RAG.
-    It performs actual quantitative analysis before synthesis,
-    producing much higher quality financial answers.
     """
     graph = StateGraph(FinancialResearchState)
 

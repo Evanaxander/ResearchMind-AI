@@ -69,6 +69,7 @@ async function apiFetch(path, options = {}, token) {
 }
 
 function App() {
+	const [authView, setAuthView] = useState('signup');
 	const [health, setHealth] = useState({
 		loading: true,
 		ok: false,
@@ -176,6 +177,7 @@ function App() {
 			});
 			saveAuth(data);
 			setAuth(data);
+			setAuthView('login');
 		} catch (error) {
 			setAuthError(error.message);
 		} finally {
@@ -194,7 +196,8 @@ function App() {
 				body: JSON.stringify(registerForm),
 			});
 			setLoginForm({ username: registerForm.username, password: registerForm.password });
-			setAuthError('Registration successful. You can log in now.');
+			setAuthView('login');
+			setAuthError('Registration successful. Log in to open your dashboard.');
 		} catch (error) {
 			setAuthError(error.message);
 		} finally {
@@ -205,6 +208,7 @@ function App() {
 	const handleLogout = () => {
 		clearAuth();
 		setAuth(null);
+		setAuthView('login');
 	};
 
 	const handleUpload = async (event) => {
@@ -281,13 +285,141 @@ function App() {
 	}, [checkHealth]);
 
 	useEffect(() => {
-		loadDocuments();
-	}, [loadDocuments]);
+		if (authToken) {
+			loadDocuments();
+			return;
+		}
+		setDocs([]);
+		setSelectedDocIds([]);
+	}, [authToken, loadDocuments]);
 
 	const statusClass = useMemo(() => {
 		if (health.loading) return 'status pending';
 		return health.ok ? 'status good' : 'status bad';
 	}, [health]);
+
+	if (!auth) {
+		return (
+			<div className="app-shell">
+				<div className="orb orb-one" />
+				<div className="orb orb-two" />
+				<main className="panel auth-wrapper">
+					<p className="eyebrow">ResearchMind</p>
+					<h1>Welcome to Your Document Intelligence Workspace</h1>
+					<p className="lede">
+						Create your account, sign in, and continue to the dashboard to analyze reports,
+						company documents, policies, and PDFs with grounded citations.
+					</p>
+
+					<section className="card-row">
+						<article className="card">
+							<h2>Backend Health</h2>
+							<div className={statusClass}>{health.message}</div>
+							<div className="health-tools">
+								<button type="button" onClick={handleManualCheck}>Recheck now</button>
+								<span>Last checked: {lastChecked}</span>
+							</div>
+							<p>Active endpoint: {health.endpoint}</p>
+						</article>
+						<article className="card">
+							<h2>Workspace Links</h2>
+							<div className="actions">
+								<a href="http://127.0.0.1:8010/docs" target="_blank" rel="noreferrer">Open API Reference</a>
+								<a href="http://127.0.0.1:8010/health" target="_blank" rel="noreferrer">Open Health JSON</a>
+							</div>
+						</article>
+					</section>
+
+					<section className="card auth-panel">
+						<div className="auth-switch">
+							<button
+								type="button"
+								className={authView === 'signup' ? 'active' : ''}
+								onClick={() => setAuthView('signup')}
+							>
+								Sign Up
+							</button>
+							<button
+								type="button"
+								className={authView === 'login' ? 'active' : ''}
+								onClick={() => setAuthView('login')}
+							>
+								Log In
+							</button>
+						</div>
+
+						{authView === 'signup' ? (
+							<form className="form" onSubmit={handleRegister}>
+								<h2>Create Account</h2>
+								<input
+									type="text"
+									placeholder="Username"
+									value={registerForm.username}
+									onChange={(e) => setRegisterForm((p) => ({ ...p, username: e.target.value }))}
+									required
+								/>
+								<input
+									type="password"
+									placeholder="Password"
+									value={registerForm.password}
+									onChange={(e) => setRegisterForm((p) => ({ ...p, password: e.target.value }))}
+									required
+								/>
+								<input
+									type="email"
+									placeholder="Email (optional)"
+									value={registerForm.email}
+									onChange={(e) => setRegisterForm((p) => ({ ...p, email: e.target.value }))}
+								/>
+								<select
+									value={registerForm.role}
+									onChange={(e) => setRegisterForm((p) => ({ ...p, role: e.target.value }))}
+								>
+									<option value="analyst">Analyst</option>
+									<option value="portfolio_manager">Portfolio Manager</option>
+									<option value="compliance">Compliance</option>
+									<option value="executive">Executive</option>
+								</select>
+								<button type="submit" disabled={authLoading}>Create account</button>
+								<p className="small-note">
+									Already have an account?{' '}
+									<button type="button" className="link-button" onClick={() => setAuthView('login')}>
+										Log in
+									</button>
+								</p>
+							</form>
+						) : (
+							<form className="form" onSubmit={handleLogin}>
+								<h2>Log In</h2>
+								<input
+									type="text"
+									placeholder="Username"
+									value={loginForm.username}
+									onChange={(e) => setLoginForm((p) => ({ ...p, username: e.target.value }))}
+									required
+								/>
+								<input
+									type="password"
+									placeholder="Password"
+									value={loginForm.password}
+									onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+									required
+								/>
+								<button type="submit" disabled={authLoading}>Enter dashboard</button>
+								<p className="small-note">
+									Need an account?{' '}
+									<button type="button" className="link-button" onClick={() => setAuthView('signup')}>
+										Sign up
+									</button>
+								</p>
+							</form>
+						)}
+						{authError ? <p className="small-note">{authError}</p> : null}
+					</section>
+				</main>
+			</div>
+		);
+	}
 
 	return (
 		<div className="app-shell">
@@ -297,24 +429,28 @@ function App() {
 				<div className="header-row">
 					<div>
 						<p className="eyebrow">ResearchMind</p>
-						<h1>Financial Intelligence Console</h1>
+						<h1>Main Dashboard</h1>
 					</div>
-					{auth ? (
-						<div className="user-badge">
-							<div>
-								<strong>{auth.username}</strong>
-								<p>{auth.role_label || auth.role}</p>
-							</div>
-							<button type="button" onClick={handleLogout}>Logout</button>
+					<div className="user-badge">
+						<div>
+							<strong>{auth.username}</strong>
+							<p>{auth.role_label || auth.role}</p>
 						</div>
-					) : null}
+						<button type="button" onClick={handleLogout}>Logout</button>
+					</div>
 				</div>
 				<p className="lede">
-					Production-ready client shell with JWT auth, secure API calls, document upload, and
-					question answering with source citations.
+					Analyze any uploaded corpus with secure access control, evidence-backed answers,
+					and source-level citations.
 				</p>
 
-				<section className="card-row">
+				<div className="platform-metrics" role="status" aria-live="polite">
+					<span>{docs.length} documents indexed</span>
+					<span>{selectedDocIds.length} selected for scope</span>
+					<span>Signed in as {auth.username}</span>
+				</div>
+
+				<section className="card-row stack-2">
 					<article className="card">
 						<h2>Backend Health</h2>
 						<div className={statusClass}>{health.message}</div>
@@ -325,90 +461,19 @@ function App() {
 						<p>Active endpoint: {health.endpoint}</p>
 					</article>
 					<article className="card">
-						<h2>Quick Links</h2>
-						<div className="actions">
-							<a href="http://127.0.0.1:8010/docs" target="_blank" rel="noreferrer">
-								Open API Docs
-							</a>
-							<a href="http://127.0.0.1:8010/health" target="_blank" rel="noreferrer">
-								Open Health JSON
-							</a>
-						</div>
-					</article>
-				</section>
-
-				<section className="card-row stack-3">
-					<article className="card">
-						<h2>Login</h2>
-						<form className="form" onSubmit={handleLogin}>
-							<input
-								type="text"
-								placeholder="Username"
-								value={loginForm.username}
-								onChange={(e) => setLoginForm((p) => ({ ...p, username: e.target.value }))}
-								required
-							/>
-							<input
-								type="password"
-								placeholder="Password"
-								value={loginForm.password}
-								onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-								required
-							/>
-							<button type="submit" disabled={authLoading}>Log in</button>
-						</form>
-						{authError ? <p className="small-note">{authError}</p> : null}
-					</article>
-
-					<article className="card">
-						<h2>Create User</h2>
-						<form className="form" onSubmit={handleRegister}>
-							<input
-								type="text"
-								placeholder="Username"
-								value={registerForm.username}
-								onChange={(e) => setRegisterForm((p) => ({ ...p, username: e.target.value }))}
-								required
-							/>
-							<input
-								type="password"
-								placeholder="Password"
-								value={registerForm.password}
-								onChange={(e) => setRegisterForm((p) => ({ ...p, password: e.target.value }))}
-								required
-							/>
-							<input
-								type="email"
-								placeholder="Email (optional)"
-								value={registerForm.email}
-								onChange={(e) => setRegisterForm((p) => ({ ...p, email: e.target.value }))}
-							/>
-							<select
-								value={registerForm.role}
-								onChange={(e) => setRegisterForm((p) => ({ ...p, role: e.target.value }))}
-							>
-								<option value="analyst">Analyst</option>
-								<option value="portfolio_manager">Portfolio Manager</option>
-								<option value="compliance">Compliance</option>
-								<option value="executive">Executive</option>
-							</select>
-							<button type="submit" disabled={authLoading}>Register</button>
-						</form>
-					</article>
-
-					<article className="card">
-						<h2>Upload Document</h2>
+						<h2>Ingest Files</h2>
 						<form className="form" onSubmit={handleUpload}>
 							<input type="file" name="file" accept=".pdf,.txt,.docx" required />
-							<button type="submit" disabled={uploading}>Upload</button>
+							<button type="submit" disabled={uploading}>Upload File</button>
 						</form>
+						<p className="small-note">Accepted formats: PDF, TXT, DOCX.</p>
 						{uploadMessage ? <p className="small-note">{uploadMessage}</p> : null}
 					</article>
 				</section>
 
 				<section className="card-row stack-2">
 					<article className="card">
-						<h2>Document Scope</h2>
+						<h2>Source Scope</h2>
 						<div className="doc-list">
 							{docsLoading ? <p className="small-note">Loading documents...</p> : null}
 							{!docsLoading && docs.length === 0 ? (
@@ -428,10 +493,10 @@ function App() {
 					</article>
 
 					<article className="card">
-						<h2>Ask Question</h2>
+						<h2>Ask the Corpus</h2>
 						<form className="form" onSubmit={handleAsk}>
 							<textarea
-								placeholder="Ask a grounded question over your uploaded financial documents"
+								placeholder="Ask a grounded question across uploaded reports, policies, and research documents"
 								value={question}
 								onChange={(e) => setQuestion(e.target.value)}
 								rows={4}
@@ -447,7 +512,7 @@ function App() {
 									onChange={(e) => setTopK(e.target.value)}
 								/>
 							</label>
-							<button type="submit" disabled={queryLoading}>Run Query</button>
+							<button type="submit" disabled={queryLoading}>Analyze</button>
 						</form>
 
 						{queryError ? <p className="small-note">{queryError}</p> : null}
@@ -477,7 +542,9 @@ function App() {
 					</article>
 				</section>
 
-				<footer className="hint">If health is red, restart backend: python -m uvicorn app.main:app --reload --port 8010</footer>
+				<footer className="hint">
+					If health is red, restart backend with: python -m uvicorn app.main:app --reload --port 8010
+				</footer>
 			</main>
 		</div>
 	);

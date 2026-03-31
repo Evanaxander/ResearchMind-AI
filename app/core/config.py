@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     # General
     APP_NAME: str = "ResearchMind"
     ENVIRONMENT: str = "development"
+    ANALYSIS_DOMAIN: str = "general"  # general | finance
+    ENABLE_FINANCIAL_ENRICHMENT: bool = False
 
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_PASSWORD: str = "neo4j"

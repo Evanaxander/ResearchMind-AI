@@ -1,31 +1,30 @@
-# FinanceIQ — AI Financial Document Intelligence Platform
+# ResearchMind AI — Document Intelligence Platform
 
-> Benchmark-driven multi-agent RAG system built for investment banks,
-> asset managers, and hedge funds. Upload 10-K filings, earnings call
-> transcripts, and analyst reports — ask questions in plain English,
-> detect contradictions automatically, and get role-appropriate answers
-> with full audit logging. Runs entirely locally. No API keys required.
+> Multi-agent RAG platform for analyzing any uploaded document set.
+> Works out of the box for reports, company filings, policies, technical docs,
+> and research PDFs. Finance-specific enrichment is available as an optional mode.
+> Runs locally with role-aware answers, citations, and audit logging.
 
 ---
 
 ## Demo
 
-### Upload a 10-K → instant financial summary
-After upload, FinanceIQ automatically extracts:
-- Document type (10-K, 10-Q, earnings call, analyst report)
-- Ticker symbol and fiscal period
-- Key metrics: revenue, net income, EPS, gross margin, guidance
-- Top risk factors
-- Table structure preserved for accurate number extraction
+### Upload any PDF/report → searchable evidence corpus
+After upload, ResearchMind automatically:
+- Detects broad document type from content and filename
+- Preserves table structure in chunks when available
+- Indexes content in FAISS for retrieval
+- Adds metadata to the knowledge graph
+- Returns an enrichment summary (domain-aware)
 
-### Ask a financial question → cited, grounded answer
+### Ask a question → cited, grounded answer
 ```
-Q: "What was Apple's revenue and how did gross margin trend?"
+Q: "What are the top risks and recommended actions in this report set?"
 
-A: Apple's revenue for the year ended September 2025 was $416,161 million,
-   with a gross margin of $195,201 million. Comparatively, in 2024, net
-   sales were $391,035 million...
-   [10k apple.pdf, chunk 274] [10k apple.pdf, chunk 678]
+A: The most frequently cited risks are vendor concentration, delayed
+  compliance milestones, and infrastructure cost volatility. The reports
+  recommend quarterly risk reviews and phased mitigation by business unit...
+  [risk_register.pdf, chunk 21] [ops_review_q4.pdf, chunk 9]
 ```
 
 ### Role-based responses
@@ -54,7 +53,7 @@ Same question, different roles, different answers:
 │  LangGraph  │  │  RAG Pipeline │  │  Knowledge Graph  │
 │  4 Agents   │  │  FAISS + Emb  │  │  Neo4j           │
 │  ─────────  │  │  ──────────── │  │  ─────────────── │
-│  Planner    │  │  Financial    │  │  Document nodes  │
+│  Planner    │  │  Domain-Aware │  │  Document nodes  │
 │  Researcher │  │  Parser       │  │  SAME_COMPANY    │
 │  Analyst    │  │  Table-aware  │  │  SAME_PERIOD     │
 │  Synthesizer│  │  Chunking     │  │  CONTRADICTS     │
@@ -97,22 +96,32 @@ python evaluation/run_comparison.py
 
 ## Features
 
-### Financial Document Intelligence
+### Domain Modes
+- Default mode is `general` for mixed report/document workloads
+- Optional `finance` mode adds ticker/period extraction and finance-focused signals
+- Toggle behavior via environment variables without code changes
+
+### Frontend User Flow
+- Landing experience shows authentication only
+- Users sign up, then log in
+- Successful login routes to the main dashboard
+- Dashboard includes upload, scope selection, querying, citations, and logout
+
+### Document Intelligence
 - Structure-aware PDF parsing using `pdfplumber` — tables preserved as markdown
-- Automatic document type detection (10-K, 10-Q, earnings call, analyst report)
-- Ticker symbol and fiscal period extraction
-- Financial metric extraction: revenue, EPS, gross margin, EBITDA, guidance
-- Risk factor identification and categorization
+- Automatic document type detection for broad report categories
+- Domain-aware enrichment summaries (general or finance mode)
+- Metadata-rich chunking for better retrieval and traceability
 
 ### Multi-Agent Research Pipeline
 Four specialized LangGraph agents working in sequence:
 1. **Planner** — classifies query type (metric/comparison/risk/general) and generates targeted sub-queries
-2. **Researcher** — runs parallel FAISS searches, prioritizes table-containing chunks, deduplicates
-3. **Analyst** — performs quantitative analysis, computes trends, flags inconsistencies
-4. **Synthesizer** — writes professional financial-grade answers with citations
+2. **Researcher** — runs FAISS searches, applies metadata filters, deduplicates evidence
+3. **Analyst** — performs structured analysis (metrics/comparison/risk/general)
+4. **Synthesizer** — writes professional answers with source citations
 
 ### Knowledge Graph (Neo4j)
-- Every document becomes a node with full financial metadata
+- Every document becomes a node with metadata
 - Automatic relationship detection: `SAME_COMPANY`, `SAME_PERIOD`, `UPDATES`
 - Contradiction detection between documents — stored as `CONTRADICTS` edges
 - Graph traversal for finding related documents the user didn't mention
@@ -147,8 +156,8 @@ Four enterprise roles with differentiated access:
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/financeiq.git
-cd financeiq
+git clone https://github.com/Evanaxander/ResearchMind-AI.git
+cd ResearchMind-AI
 
 # Virtual environment
 python -m venv venv
@@ -162,10 +171,17 @@ cp .env.example .env
 # Edit .env: set NEO4J_PASSWORD to your Neo4j password
 
 # Start
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8010
+
+# Frontend (new terminal)
+cd frontend
+npm install
+npm start
 ```
 
-Open `http://localhost:8000/docs`
+Open:
+- Frontend: `http://localhost:3000`
+- API docs: `http://127.0.0.1:8010/docs`
 
 ### Run with Docker
 
@@ -201,6 +217,16 @@ DELETE /api/v1/documents/{doc_id}  # Delete a document
 ```
 
 ### Query
+```bash
+POST /api/v1/query
+{
+  "question": "What are the key risks and recommendations across these reports?",
+  "top_k": 5,
+  "doc_type_filter": "report"
+}
+```
+
+Finance-mode example:
 ```bash
 POST /api/v1/query
 {
@@ -309,6 +335,8 @@ pytest tests/ -v
 |---|---|---|
 | `NEO4J_URI` | Neo4j connection URL | `bolt://localhost:7687` |
 | `NEO4J_PASSWORD` | Neo4j password | `neo4j` |
+| `ANALYSIS_DOMAIN` | Domain mode: `general` or `finance` | `general` |
+| `ENABLE_FINANCIAL_ENRICHMENT` | Enable finance-specific extraction | `false` |
 | `UPLOAD_DIR` | Document storage path | `./uploads` |
 | `FAISS_INDEX_DIR` | FAISS index path | `./faiss_index` |
 | `MAX_UPLOAD_SIZE_MB` | Max upload size | `20` |

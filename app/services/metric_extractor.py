@@ -52,6 +52,9 @@ class ExtractedMetrics:
 
     # Raw extraction confidence
     confidence:       float           = 0.0
+    # General-purpose enrichment
+    key_topics:       list[str]       = field(default_factory=list)
+    document_intent:  Optional[str]   = None
 
 
 class MetricExtractor:
@@ -67,7 +70,9 @@ class MetricExtractor:
     Regex can't handle all variations. An LLM can.
     """
 
-    def __init__(self):
+    def __init__(self, domain_mode: str = "general", enabled: bool = False):
+        self.domain_mode = domain_mode.lower().strip()
+        self.enabled = enabled
         self.llm = ChatOllama(model="mistral", temperature=0)
 
     def extract(self, text: str, doc_type: str = "general") -> ExtractedMetrics:
@@ -77,6 +82,17 @@ class MetricExtractor:
         """
         sample = text[:6000]
         metrics = ExtractedMetrics(doc_type=doc_type)
+
+        if not self.enabled:
+            metrics.key_topics = self._keyword_topics(sample)
+            metrics.document_intent = self._guess_intent(sample)
+            return metrics
+
+        if self.domain_mode != "finance":
+            metrics.key_topics = self._extract_topics(sample)
+            metrics.document_intent = self._extract_document_intent(sample)
+            metrics.confidence = 0.75 if metrics.key_topics or metrics.document_intent else 0.4
+            return metrics
 
         # Run extractions
         metrics.revenue          = self._extract_field(sample, "total revenue or net sales")
@@ -199,8 +215,69 @@ TEXT:
         found = sum(1 for f in key_fields if f is not None)
         return round(found / len(key_fields), 2)
 
+    def _extract_topics(self, text: str) -> list[str]:
+        prompt = f"""List up to 5 concise key topics covered in this document.
+Return one topic per line with no numbering.
+
+TEXT:
+{text[:4000]}"""
+        try:
+            response = self.llm.invoke(prompt).content.strip()
+            topics = []
+            for line in response.split("\n"):
+                clean = re.sub(r'^[\d]+[.)]\s*', '', line.strip())
+                if clean and 2 <= len(clean) <= 80:
+                    topics.append(clean)
+            return topics[:5]
+        except Exception:
+            return self._keyword_topics(text)
+
+    def _extract_document_intent(self, text: str) -> Optional[str]:
+        prompt = f"""In one sentence, describe the primary purpose of this document.
+If unclear, reply NOT_FOUND.
+
+TEXT:
+{text[:3500]}"""
+        try:
+            response = self.llm.invoke(prompt).content.strip()
+            if "NOT_FOUND" in response:
+                return None
+            return response[:220]
+        except Exception:
+            return self._guess_intent(text)
+
+    def _keyword_topics(self, text: str) -> list[str]:
+        candidates = [
+            "summary", "objective", "scope", "methodology", "findings", "recommendation",
+            "risk", "compliance", "timeline", "budget", "governance", "kpi",
+        ]
+        lowered = text.lower()
+        return [c for c in candidates if c in lowered][:5]
+
+    def _guess_intent(self, text: str) -> Optional[str]:
+        lowered = text.lower()
+        if "recommend" in lowered or "recommendation" in lowered:
+            return "Provide recommendations and supporting rationale."
+        if "policy" in lowered or "compliance" in lowered:
+            return "Define policy or compliance expectations."
+        if "analysis" in lowered or "findings" in lowered:
+            return "Present analysis findings and conclusions."
+        return None
+
     def format_for_display(self, metrics: ExtractedMetrics) -> str:
         """Format extracted metrics as a readable summary string."""
+        if self.domain_mode != "finance":
+            lines = [f"Document type: {metrics.doc_type or 'general'}", ""]
+            if metrics.document_intent:
+                lines.append(f"Intent: {metrics.document_intent}")
+            if metrics.key_topics:
+                lines.append("Key topics:")
+                for i, topic in enumerate(metrics.key_topics, 1):
+                    lines.append(f"  {i}. {topic}")
+            if len(lines) == 2:
+                lines.append("No additional enrichment available.")
+            return "\n".join(lines)
+
         lines = []
 
         if metrics.ticker:

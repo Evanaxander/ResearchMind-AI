@@ -34,8 +34,11 @@ class DocumentService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self.upload_dir / "_registry.json"
         self.rag            = RAGService()
-        self.parser         = FinancialParser()
-        self.extractor      = MetricExtractor()
+        self.parser         = FinancialParser(domain_mode=settings.ANALYSIS_DOMAIN)
+        self.extractor      = MetricExtractor(
+            domain_mode=settings.ANALYSIS_DOMAIN,
+            enabled=settings.ENABLE_FINANCIAL_ENRICHMENT,
+        )
         self.graph          = GraphService()
         self.contradiction  = ContradictionAgent()
 
@@ -58,7 +61,7 @@ class DocumentService:
     ) -> tuple[DocumentMetadata, str, list[dict]]:
         """
         Full pipeline: save → parse → extract → index → graph → alert.
-        Returns (DocumentMetadata, financial_summary, contradictions).
+        Returns (DocumentMetadata, document_summary, contradictions).
         """
         meta = DocumentMetadata(
             filename     = filename,
@@ -74,9 +77,9 @@ class DocumentService:
         # 2. Parse with financial parser
         parsed = self.parser.parse(file_path, filename)
 
-        # 3. Extract financial metrics
+        # 3. Optional enrichment (finance-specific when enabled)
         metrics           = self.extractor.extract(parsed.raw_text, parsed.doc_type)
-        financial_summary = self.extractor.format_for_display(metrics)
+        document_summary  = self.extractor.format_for_display(metrics)
 
         # 4. Enrich metadata
         meta.doc_type              = parsed.doc_type
@@ -104,7 +107,7 @@ class DocumentService:
 
         # 7. Contradiction check
         contradictions = []
-        if meta.ticker and meta.ticker != "unknown":
+        if settings.ANALYSIS_DOMAIN == "finance" and meta.ticker and meta.ticker != "unknown":
             contradictions = self.contradiction.check_on_upload(
                 new_doc_id   = meta.doc_id,
                 new_doc_text = parsed.raw_text,
@@ -127,7 +130,7 @@ class DocumentService:
         registry[meta.doc_id] = meta.model_dump()
         self._save_registry(registry)
 
-        return meta, financial_summary, contradictions
+        return meta, document_summary, contradictions
 
     async def list_documents(self) -> list[DocumentMetadata]:
         registry = self._load_registry()
