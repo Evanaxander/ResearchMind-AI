@@ -1,0 +1,12 @@
+body {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Segoe UI', 'Trebuchet MS', sans-serif;
+  background: #0b1020;
+  color: #f4f7ff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: 'IBM Plex Mono', Consolas, monospace;
+}

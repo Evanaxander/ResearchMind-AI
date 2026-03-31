@@ -81,7 +81,18 @@ class RAGService:
         Embed the question, search FAISS indexes, return top_k chunks with scores.
         If doc_ids is None, searches all indexed documents.
         """
-        targets = doc_ids if doc_ids else self._all_indexed_doc_ids()
+        # Clean user-provided ids from API clients (Swagger often sends empty strings).
+        cleaned_doc_ids = [d.strip() for d in (doc_ids or []) if d and d.strip()]
+        all_indexed = self._all_indexed_doc_ids()
+
+        if cleaned_doc_ids:
+            # Keep only doc_ids that have a complete FAISS index on disk.
+            targets = [d for d in cleaned_doc_ids if (self.index_dir / d / "index.faiss").exists()]
+            # If all provided ids are invalid, fall back to all indexed docs.
+            if not targets:
+                targets = all_indexed
+        else:
+            targets = all_indexed
 
         if not targets:
             return []
@@ -90,7 +101,8 @@ class RAGService:
         combined_store = None
         for doc_id in targets:
             index_path = self.index_dir / doc_id
-            if not index_path.exists():
+            index_file = index_path / "index.faiss"
+            if not index_file.exists():
                 continue
             store = FAISS.load_local(
                 str(index_path),
@@ -137,4 +149,10 @@ class RAGService:
 
     def _all_indexed_doc_ids(self) -> List[str]:
         """Return all doc_ids that have a FAISS index on disk."""
-        return [p.name for p in self.index_dir.iterdir() if p.is_dir()]
+        if not self.index_dir.exists():
+            return []
+        return [
+            p.name
+            for p in self.index_dir.iterdir()
+            if p.is_dir() and (p / "index.faiss").exists()
+        ]

@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "ResearchMind"
     ENVIRONMENT: str = "development"
 
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_PASSWORD: str = "neo4j"
+
     # API Keys (loaded from .env)
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""

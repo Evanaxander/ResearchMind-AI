@@ -1,0 +1,34 @@
+{
+  "alice": {
+    "username": "alice",
+    "email": "",
+    "role": "analyst",
+    "password_hash": "$2b$12$omoGjWGtFBx5s0USQfAxvuC3/wjytM0BXv7Wrw0DJi1ZgI7NfedlK",
+    "created_at": "2026-03-29T08:35:28.988873",
+    "last_login": "2026-03-29T09:13:08.655434"
+  },
+  "bob": {
+    "username": "bob",
+    "email": "",
+    "role": "executive",
+    "password_hash": "$2b$12$lHgHU/FOpQzQB/jRrB2MTeX3dWiQqiYYw8etebMpHIAVKLqvl2AgK",
+    "created_at": "2026-03-29T08:35:29.647527",
+    "last_login": null
+  },
+  "carol": {
+    "username": "carol",
+    "email": "",
+    "role": "compliance",
+    "password_hash": "$2b$12$A.uI9mFlc99/Ap00NVnx0.Bo5rOe8iokJgPqeHJPF6Udifr/rg1vy",
+    "created_at": "2026-03-29T08:35:30.260913",
+    "last_login": "2026-03-29T09:00:03.588490"
+  },
+  "dave": {
+    "username": "dave",
+    "email": "",
+    "role": "portfolio_manager",
+    "password_hash": "$2b$12$8TSt1.mvoBDSB5sihzD61Onx.cWT6FYsMAD2K7CawUwy.exjfENTG",
+    "created_at": "2026-03-29T08:35:30.872614",
+    "last_login": "2026-03-29T08:50:46.710667"
+  }
+}
